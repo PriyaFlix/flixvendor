@@ -127,11 +127,11 @@ type DataRow = {
 
 type WeeklyPivotRow = {
   name: string;
-  values: number[];
-  w1: number;
-  w2: number;
-  w3: number;
-  w4: number;
+  values: Array<number | undefined>;
+  w1?: number;
+  w2?: number;
+  w3?: number;
+  w4?: number;
   agent_type?: string;
   supervisor?: string;
   vendor?: string;
@@ -151,15 +151,7 @@ type OverviewData = {
   call: DataRow[];
 };
 
-type QaAgentRow = {
-  name: string;
-  w1: number;
-  w2: number;
-  w3: number;
-  w4: number;
-  values?: number[];
-  count?: number;
-};
+type QaAgentRow = WeeklyPivotRow;
 
 type QaSummary = {
   avgVendor: number;
@@ -169,7 +161,7 @@ type QaSummary = {
   below85: number;
   trend: { week: string; vendor: number; flix: number }[];
   matchedCases: DataRow[];
-  agentRows: QaAgentRow[];
+  agentRows: WeeklyPivotRow[];
   comments: { theme: string; count: number }[];
   inps: { label: string; value: number }[];
 };
@@ -189,6 +181,11 @@ function formatNumber(value: number | string | undefined) {
   if (value == null || value === "") return "—";
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric.toFixed(1) : "—";
+}
+
+function renderValue(value: number | string | undefined) {
+  if (value == null || value === "" || Number.isNaN(Number(value))) return "—";
+  return formatNumber(value);
 }
 
 function mergeWithMapping(rows: DataRow[], mapping: MappingRow[]) {
@@ -254,14 +251,14 @@ function pivotWeeklyRows(
   return {
     weeks,
     rows: Array.from(pivotMap.values()).map((item) => {
-      const values = item.sums.map((sum, idx) => (item.counts[idx] ? sum / item.counts[idx] : 0));
+      const values = item.sums.map((sum, idx) => (item.counts[idx] ? sum / item.counts[idx] : undefined));
       return {
         name: item.key,
         values,
-        w1: values[0] ?? 0,
-        w2: values[1] ?? 0,
-        w3: values[2] ?? 0,
-        w4: values[3] ?? 0,
+        w1: values[0],
+        w2: values[1],
+        w3: values[2],
+        w4: values[3],
       };
     }),
   };
@@ -291,14 +288,16 @@ function pivotWeeklyPercentRows(
   return {
     weeks,
     rows: Array.from(pivotMap.values()).map((item) => {
-      const values = item.yes.map((yesCount, idx) => (item.total[idx] ? (yesCount / item.total[idx]) * 100 : 0));
+      const values = item.yes.map((yesCount, idx) =>
+        item.total[idx] ? (yesCount / item.total[idx]) * 100 : undefined,
+      );
       return {
         name: item.key,
         values,
-        w1: values[0] ?? 0,
-        w2: values[1] ?? 0,
-        w3: values[2] ?? 0,
-        w4: values[3] ?? 0,
+        w1: values[0],
+        w2: values[1],
+        w3: values[2],
+        w4: values[3],
       };
     }),
   };
@@ -388,6 +387,9 @@ export default function Dashboard() {
   const getVendorKey = (row: DataRow) =>
     row.mapping?.vendor || row.vendor || row.agent_team || row.mapping?.agent_name || "Unknown";
 
+  const getChatAgentTeamKey = (row: DataRow) =>
+    row.agent_team ?? "Unknown";
+
   const getPartnerKey = (row: DataRow) =>
     row.partner || row.mapping?.vendor || row.vendor || row.mapping?.agent_name || "Unknown";
 
@@ -425,6 +427,30 @@ export default function Dashboard() {
   const uniqueCategories = useMemo(() => {
     return ["All", ...new Set(mapping.map((row) => row.category).filter(Boolean))];
   }, [mapping]);
+
+  const activeFilters = useMemo(() => {
+    const filters: { label: string; value: string; clear: () => void }[] = [];
+    if (filterVendor !== "All") filters.push({ label: `Vendor: ${filterVendor}`, value: filterVendor, clear: () => setFilterVendor("All") });
+    if (filterLanguage !== "All") filters.push({ label: `Language: ${filterLanguage}`, value: filterLanguage, clear: () => setFilterLanguage("All") });
+    if (filterWeek !== "All") filters.push({ label: `Week: ${filterWeek}`, value: filterWeek, clear: () => setFilterWeek("All") });
+    if (filterAgentType !== "All") filters.push({ label: `Agent type: ${filterAgentType}`, value: filterAgentType, clear: () => setFilterAgentType("All") });
+    if (filterAgent !== "All") filters.push({ label: `Agent: ${filterAgent}`, value: filterAgent, clear: () => setFilterAgent("All") });
+    if (filterSupervisor !== "All") filters.push({ label: `Supervisor: ${filterSupervisor}`, value: filterSupervisor, clear: () => setFilterSupervisor("All") });
+    if (filterWave !== "All") filters.push({ label: `Wave: ${filterWave}`, value: filterWave, clear: () => setFilterWave("All") });
+    if (filterCategory !== "All") filters.push({ label: `Category: ${filterCategory}`, value: filterCategory, clear: () => setFilterCategory("All") });
+    if (filterQueue !== "All") filters.push({ label: `Queue: ${filterQueue}`, value: filterQueue, clear: () => setFilterQueue("All") });
+    return filters;
+  }, [
+    filterVendor,
+    filterLanguage,
+    filterWeek,
+    filterAgentType,
+    filterAgent,
+    filterSupervisor,
+    filterWave,
+    filterCategory,
+    filterQueue,
+  ]);
 
   const uniqueQueues = useMemo(() => {
     return ["All", ...new Set(mapping.map((row) => row.queue).filter(Boolean))];
@@ -501,11 +527,11 @@ export default function Dashboard() {
     [overviewFiltered.email],
   );
 
-  const chatVendorPivot = useMemo(
+  const chatAgentTeamPivot = useMemo(
     () =>
       pivotWeeklyRows(
         overviewFiltered.chat,
-        getVendorKey,
+        getChatAgentTeamKey,
         (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1),
       ),
     [overviewFiltered.chat],
@@ -523,7 +549,7 @@ export default function Dashboard() {
 
   const csatVendorPivot = useMemo(
     () =>
-      pivotWeeklyPercentRows(csatFiltered, getVendorKey, (row) => Number(row.survey_rating) >= 4),
+      pivotWeeklyRows(csatFiltered, getVendorKey, (row) => toNumber(row.survey_rating ?? row.avg_csat)),
     [csatFiltered],
   );
 
@@ -852,6 +878,21 @@ export default function Dashboard() {
               ))}
             </select>
           </div>
+          {activeFilters.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {activeFilters.map((filter) => (
+                <button
+                  key={filter.label}
+                  type="button"
+                  onClick={filter.clear}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-sm text-slate-700 hover:bg-slate-200"
+                >
+                  <span>{filter.label}</span>
+                  <span aria-hidden="true" className="text-slate-500">×</span>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         {activeTab === "overview" && (
@@ -901,23 +942,24 @@ export default function Dashboard() {
                     <table className="min-w-full text-left text-sm text-slate-700">
                       <thead>
                         <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Vendor</th>
-                          {chatVendorPivot.weeks.map((week) => (
+                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent team</th>
+                          {chatAgentTeamPivot.weeks.map((week) => (
                             <th key={`chat-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {chatVendorPivot.rows.length === 0 ? (
-                          <tr><td colSpan={chatVendorPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No chat AHT data available.</td></tr>
+                        {chatAgentTeamPivot.rows.length === 0 ? (
+                          <tr><td colSpan={chatAgentTeamPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No chat AHT data available.</td></tr>
                         ) : (
-                          chatVendorPivot.rows.map((row, index) => (
+                          chatAgentTeamPivot.rows.map((row, index) => (
                             <tr key={`chat-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-chat-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
@@ -925,7 +967,6 @@ export default function Dashboard() {
                     </table>
                   </div>
                 </div>
-
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
                     <h2 className="text-lg font-semibold text-slate-900">Call AHT by agent team</h2>
@@ -961,7 +1002,7 @@ export default function Dashboard() {
 
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">CSAT % by vendor</h2>
+                    <h2 className="text-lg font-semibold text-slate-900">Avg CSAT score by vendor</h2>
                   </div>
                   <div className="overflow-auto px-6 py-4">
                     <table className="min-w-full text-left text-sm text-slate-700">
@@ -980,10 +1021,11 @@ export default function Dashboard() {
                           csatVendorPivot.rows.map((row, index) => (
                             <tr key={`csat-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}%</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-csat-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
@@ -1013,10 +1055,11 @@ export default function Dashboard() {
                           qaPartnerPivot.rows.map((row, index) => (
                             <tr key={`qa-partner-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-qa-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value !== undefined ? value * 100 : undefined)}%
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
