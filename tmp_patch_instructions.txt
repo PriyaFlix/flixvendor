@@ -1,0 +1,1 @@
+Patch dashboard.tsx to replace hardcoded row.w1..w4 cells with row.values loops for emailVendorPivot and callVendorPivot tables, and also inspect any other static row.W1..W4 renderers.

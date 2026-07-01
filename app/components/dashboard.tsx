@@ -967,10 +967,11 @@ export default function Dashboard() {
                           emailVendorPivot.rows.map((row, index) => (
                             <tr key={`email-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-email-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
@@ -1033,10 +1034,11 @@ export default function Dashboard() {
                           callVendorPivot.rows.map((row, index) => (
                             <tr key={`call-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-call-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
@@ -1190,10 +1192,11 @@ export default function Dashboard() {
                           agentCsatPivot.rows.map((row, index) => (
                             <tr key={`agent-csat-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}%</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}%</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-agent-csat-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}%
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
@@ -1223,10 +1226,11 @@ export default function Dashboard() {
                           agentQaPivot.rows.map((row, index) => (
                             <tr key={`agent-qa-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w2)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w3)}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w4)}</td>
+                              {row.values.map((value, valueIndex) => (
+                                <td key={`${row.name}-agent-qa-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                  {formatNumber(value)}
+                                </td>
+                              ))}
                             </tr>
                           ))
                         )}
