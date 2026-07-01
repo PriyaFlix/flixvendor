@@ -72,6 +72,7 @@ type DataRow = {
   channel?: string;
   type?: string;
   week?: string;
+  team_name?: string;
   week_number?: number | string;
   week_no?: number | string;
   weekNum?: number | string;
@@ -355,16 +356,60 @@ export default function Dashboard() {
       const mergedCsat = mergeWithMapping(csatRes.data ?? [], mappingRes.data ?? []);
       const mergedQa = mergeWithMapping(qaRes.data ?? [], mappingRes.data ?? []);
 
+      // Filter out csat rows without team_name
+      const filteredCsat = (mergedCsat as DataRow[]).filter((r) => Boolean(r.team_name));
+
+      // Aggregate chat AHT per agent_team and week (SQL equivalent client-side)
+      const chatAggMap = new Map<string, { key: string; weekSums: Map<string, { sum: number; count: number }> }>();
+      (mergedChatCall as DataRow[]).forEach((row) => {
+        const team = row.agent_team ?? row.mapping?.agent_name ?? "Unknown";
+        const wk = getRowWeek(row);
+        if (!team || !wk) return;
+        const entry = chatAggMap.get(team) ?? { key: team, weekSums: new Map() };
+        const wkEntry = entry.weekSums.get(wk) ?? { sum: 0, count: 0 };
+        wkEntry.sum += toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1);
+        wkEntry.count += 1;
+        entry.weekSums.set(wk, wkEntry);
+        chatAggMap.set(team, entry);
+      });
+      const chatAggRows: DataRow[] = [];
+      chatAggMap.forEach((entry) => {
+        entry.weekSums.forEach((wkVal, wk) => {
+          chatAggRows.push({ agent_team: entry.key, week: wk, avg_handling_time: wkVal.count ? wkVal.sum / wkVal.count : 0 });
+        });
+      });
+
+      // Aggregate QA per partner and week, vendor QA only (exclude reviewer 'Quality assurance')
+      const qaAggMap = new Map<string, { key: string; weekSums: Map<string, { sum: number; count: number }> }>();
+      (mergedQa as DataRow[]).forEach((row) => {
+        if ((row.reviewer ?? "").toLowerCase() === "quality assurance") return; // exclude Flix QA
+        const partner = row.partner ?? row.mapping?.vendor ?? "Unknown";
+        const wk = getRowWeek(row);
+        if (!partner || !wk) return;
+        const entry = qaAggMap.get(partner) ?? { key: partner, weekSums: new Map() };
+        const wkEntry = entry.weekSums.get(wk) ?? { sum: 0, count: 0 };
+        wkEntry.sum += toNumber(row.evaluation ?? row.score ?? 0);
+        wkEntry.count += 1;
+        entry.weekSums.set(wk, wkEntry);
+        qaAggMap.set(partner, entry);
+      });
+      const qaAggRows: DataRow[] = [];
+      qaAggMap.forEach((entry) => {
+        entry.weekSums.forEach((wkVal, wk) => {
+          qaAggRows.push({ partner: entry.key, week: wk, evaluation: wkVal.count ? wkVal.sum / wkVal.count : 0 });
+        });
+      });
+
       setOverviewData({
         email: mergedEmail,
-        chat: mergedChatCall.filter((row) => row.channel?.toLowerCase() === "chat" || row.type?.toLowerCase() === "chat"),
+        chat: chatAggRows.filter((row) => (row as DataRow).agent_team && ((row as DataRow).agent_team as string).toLowerCase() !== ""),
         call: mergedChatCall.filter((row) => row.channel?.toLowerCase() === "call" || row.type?.toLowerCase() === "call"),
       });
 
       setAgentWiseData([...mergedEmail, ...mergedChatCall, ...mergedCsat, ...mergedQa]);
       setAhtData([...mergedEmail, ...mergedChatCall]);
-      setCsatData(mergedCsat);
-      setQaData(mergedQa);
+      setCsatData(filteredCsat);
+      setQaData(qaAggRows);
 
       setLoadingOverview(false);
       setLoadingAgentWise(false);
@@ -385,7 +430,7 @@ export default function Dashboard() {
   }, [mapping]);
 
   const getVendorKey = (row: DataRow) =>
-    row.mapping?.vendor || row.vendor || row.agent_team || row.mapping?.agent_name || "Unknown";
+    row.team_name || row.mapping?.vendor || row.vendor || row.agent_team || row.mapping?.agent_name || "Unknown";
 
   const getChatAgentTeamKey = (row: DataRow) =>
     row.agent_team ?? "Unknown";
