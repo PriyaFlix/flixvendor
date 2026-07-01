@@ -315,15 +315,15 @@ export default function Dashboard() {
     const allScores = rows.map((row: any) => Number(row.score ?? 0));
     const vendor = rows.filter((row: any) => row.reviewer?.toLowerCase() !== "quality assurance");
     const flix = rows.filter((row: any) => row.reviewer?.toLowerCase() === "quality assurance");
-    const avgVendor = vendor.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(vendor.length, 1);
-    const avgFlix = flix.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(flix.length, 1);
-    const discrepancyCases = rows.filter((row: any) => Math.abs(Number(row.score ?? 0) - Number(row.vendor_score ?? 0)) > 5).length;
+    const avgVendor = (vendor.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(vendor.length, 1)) * 100;
+    const avgFlix = (flix.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(flix.length, 1)) * 100;
+    const discrepancyCases = rows.filter((row: any) => Math.abs(Number(row.score ?? 0) - Number(row.vendor_score ?? 0)) > 0.05).length;
     return {
       avgVendor: Number(avgVendor.toFixed(1)),
       avgFlix: Number(avgFlix.toFixed(1)),
       discrepancyRate: Math.round((discrepancyCases / Math.max(rows.length, 1)) * 100),
       ztCount: rows.filter((row: any) => row.flag === "ZT" || row.case_status === "ZT").length,
-      below85: rows.filter((row: any) => Number(row.score ?? 0) < 85).length,
+      below85: rows.filter((row: any) => Number(row.score ?? 0) < 0.85).length,
       trend: [
         { week: "W1", vendor: avgVendor + 2, flix: avgFlix + 1 },
         { week: "W2", vendor: avgVendor + 1, flix: avgFlix + 2 },
@@ -794,11 +794,11 @@ export default function Dashboard() {
                 <div className="grid gap-4 md:grid-cols-5">
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm text-slate-500">Avg vendor QA</p>
-                    <p className="mt-3 text-3xl font-semibold text-slate-900">{formatNumber(qaSummary.avgVendor)}</p>
+                    <p className="mt-3 text-3xl font-semibold text-slate-900">{formatNumber(qaSummary.avgVendor)}%</p>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm text-slate-500">Avg Flix QA</p>
-                    <p className="mt-3 text-3xl font-semibold text-slate-900">{formatNumber(qaSummary.avgFlix)}</p>
+                    <p className="mt-3 text-3xl font-semibold text-slate-900">{formatNumber(qaSummary.avgFlix)}%</p>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm text-slate-500">Discrepancy rate</p>
@@ -849,7 +849,7 @@ export default function Dashboard() {
                           {qaSummary.matchedCases.map((row: any, idx: number) => (
                             <tr key={`match-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium">{row.agent_name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{row.score}</td>
+                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(Number(row.score ?? 0) * 100)}%</td>
                               <td className="border-b border-slate-200 px-3 py-3">{row.reviewer}</td>
                             </tr>
                           ))}
@@ -876,10 +876,10 @@ export default function Dashboard() {
                           {qaSummary.agentRows.slice(0, 8).map((agent: any, idx: number) => (
                             <tr key={`qa-agent-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium">{agent.name}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(agent.w1 / Math.max(agent.count, 1))}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(agent.w2 / Math.max(agent.count, 1))}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(agent.w3 / Math.max(agent.count, 1))}</td>
-                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber(agent.w4 / Math.max(agent.count, 1))}</td>
+                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber((agent.w1 / Math.max(agent.count, 1)) * 100)}%</td>
+                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber((agent.w2 / Math.max(agent.count, 1)) * 100)}%</td>
+                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber((agent.w3 / Math.max(agent.count, 1)) * 100)}%</td>
+                              <td className="border-b border-slate-200 px-3 py-3">{formatNumber((agent.w4 / Math.max(agent.count, 1)) * 100)}%</td>
                             </tr>
                           ))}
                         </tbody>
