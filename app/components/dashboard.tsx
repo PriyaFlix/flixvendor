@@ -52,6 +52,95 @@ const agentWiseScreens = [
   { id: 2, label: "Vendor 2 & 6" },
 ] as const;
 
+type MappingRow = {
+  agent_name?: string;
+  vendor?: string;
+  language?: string;
+  agent_type?: string;
+  supervisor?: string;
+  wave?: string;
+  category?: string;
+  queue?: string;
+  root_cause?: string;
+  issue_focus?: string;
+  flag?: string;
+  case_status?: string;
+};
+
+type DataRow = {
+  agent_name?: string;
+  channel?: string;
+  type?: string;
+  week?: string;
+  w1?: number | string;
+  w2?: number | string;
+  w3?: number | string;
+  w4?: number | string;
+  aht_w1?: number | string;
+  aht_w2?: number | string;
+  aht_w3?: number | string;
+  aht_w4?: number | string;
+  aht?: number | string;
+  avg_aht?: number | string;
+  vendor?: string;
+  csat_w1?: number | string;
+  csat_w2?: number | string;
+  csat_w3?: number | string;
+  csat_w4?: number | string;
+  qa_w1?: number | string;
+  qa_w2?: number | string;
+  qa_w3?: number | string;
+  qa_w4?: number | string;
+  volume?: number | string;
+  talk_time?: number | string;
+  wrap_time?: number | string;
+  agent_type?: string;
+  supervisor?: string;
+  category?: string;
+  issue_focus?: string;
+  dsat_rate?: number | string;
+  avg_csat?: number | string;
+  severity?: string;
+  score?: number | string;
+  vendor_score?: number | string;
+  survey_rating?: number | string;
+  comment?: string;
+  verbatim?: string;
+  root_cause?: string;
+  reviewer?: string;
+  flag?: string;
+  case_status?: string;
+  mapping?: MappingRow;
+};
+
+type OverviewData = {
+  email: DataRow[];
+  chat: DataRow[];
+  call: DataRow[];
+};
+
+type QaAgentRow = {
+  name: string;
+  w1: number;
+  w2: number;
+  w3: number;
+  w4: number;
+  count: number;
+};
+
+type QaSummary = {
+  avgVendor: number;
+  avgFlix: number;
+  discrepancyRate: number;
+  ztCount: number;
+  below85: number;
+  trend: { week: string; vendor: number; flix: number }[];
+  matchedCases: DataRow[];
+  agentRows: QaAgentRow[];
+  comments: { theme: string; count: number }[];
+  inps: { label: string; value: number }[];
+};
+
 const GOOD = "#34D399";
 const BAD = "#F87171";
 const NEUTRAL = "#A3A3A3";
@@ -63,17 +152,21 @@ function getChip(value: number | string | undefined, positive?: boolean) {
   return numeric >= 85 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
 }
 
-function formatNumber(value: number | undefined) {
-  return value == null ? "—" : Number(value).toFixed(1);
+function formatNumber(value: number | string | undefined) {
+  if (value == null || value === "") return "—";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(1) : "—";
 }
 
-function mergeWithMapping(rows: any[], mapping: any[]) {
-  const map = mapping.reduce((acc: any, row: any) => {
-    acc[row.agent_name] = row;
+function mergeWithMapping(rows: DataRow[], mapping: MappingRow[]) {
+  const map = mapping.reduce((acc: Record<string, MappingRow>, row: MappingRow) => {
+    if (row.agent_name) {
+      acc[row.agent_name] = row;
+    }
     return acc;
-  }, {} as any);
+  }, {} as Record<string, MappingRow>);
 
-  return rows.map((row) => ({ ...row, mapping: map[row.agent_name] ?? {} }));
+  return rows.map((row) => ({ ...row, mapping: row.agent_name ? map[row.agent_name] ?? {} : {} }));
 }
 
 export default function Dashboard() {
@@ -93,12 +186,12 @@ export default function Dashboard() {
   const [filterCategory, setFilterCategory] = useState("All");
   const [filterQueue, setFilterQueue] = useState("All");
 
-  const [mapping, setMapping] = useState<any[]>([]);
-  const [overviewData, setOverviewData] = useState<any>({ email: [], chat: [], call: [] });
-  const [agentWiseData, setAgentWiseData] = useState<any[]>([]);
-  const [ahtData, setAhtData] = useState<any[]>([]);
-  const [csatData, setCsatData] = useState<any[]>([]);
-  const [qaData, setQaData] = useState<any[]>([]);
+  const [mapping, setMapping] = useState<MappingRow[]>([]);
+  const [overviewData, setOverviewData] = useState<OverviewData>({ email: [], chat: [], call: [] });
+  const [agentWiseData, setAgentWiseData] = useState<DataRow[]>([]);
+  const [ahtData, setAhtData] = useState<DataRow[]>([]);
+  const [csatData, setCsatData] = useState<DataRow[]>([]);
+  const [qaData, setQaData] = useState<DataRow[]>([]);
 
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingAgentWise, setLoadingAgentWise] = useState(false);
@@ -161,11 +254,11 @@ export default function Dashboard() {
     return [
       "All",
       ...new Set([
-        ...overviewData.email.map((row: any) => row.week),
-        ...overviewData.chat.map((row: any) => row.week),
-        ...overviewData.call.map((row: any) => row.week),
-        ...csatData.map((row: any) => row.week),
-        ...qaData.map((row: any) => row.week),
+        ...overviewData.email.map((row) => row.week),
+        ...overviewData.chat.map((row) => row.week),
+        ...overviewData.call.map((row) => row.week),
+        ...csatData.map((row) => row.week),
+        ...qaData.map((row) => row.week),
       ]),
     ];
   }, [overviewData, csatData, qaData]);
@@ -175,7 +268,7 @@ export default function Dashboard() {
   }, [mapping]);
 
   const uniqueAgents = useMemo(() => {
-    return ["All", ...new Set(agentWiseData.map((row: any) => row.agent_name).filter(Boolean))];
+    return ["All", ...new Set(agentWiseData.map((row) => row.agent_name).filter(Boolean))];
   }, [agentWiseData]);
 
   const uniqueSupervisors = useMemo(() => {
@@ -194,18 +287,18 @@ export default function Dashboard() {
     return ["All", ...new Set(mapping.map((row) => row.queue).filter(Boolean))];
   }, [mapping]);
 
-  const vendorFilterFn = (row: any) => filterVendor === "All" || row.mapping?.vendor === filterVendor;
-  const languageFilterFn = (row: any) => filterLanguage === "All" || row.mapping?.language === filterLanguage;
-  const weekFilterFn = (row: any) => filterWeek === "All" || row.week === filterWeek;
-  const typeFilterFn = (row: any) => filterAgentType === "All" || row.mapping?.agent_type === filterAgentType;
-  const agentFilterFn = (row: any) => filterAgent === "All" || row.agent_name === filterAgent;
-  const supervisorFilterFn = (row: any) => filterSupervisor === "All" || row.mapping?.supervisor === filterSupervisor;
-  const waveFilterFn = (row: any) => filterWave === "All" || row.mapping?.wave === filterWave;
-  const categoryFilterFn = (row: any) => filterCategory === "All" || row.mapping?.category === filterCategory;
-  const queueFilterFn = (row: any) => filterQueue === "All" || row.mapping?.queue === filterQueue;
+  const vendorFilterFn = (row: DataRow) => filterVendor === "All" || row.mapping?.vendor === filterVendor;
+  const languageFilterFn = (row: DataRow) => filterLanguage === "All" || row.mapping?.language === filterLanguage;
+  const weekFilterFn = (row: DataRow) => filterWeek === "All" || row.week === filterWeek;
+  const typeFilterFn = (row: DataRow) => filterAgentType === "All" || row.mapping?.agent_type === filterAgentType;
+  const agentFilterFn = (row: DataRow) => filterAgent === "All" || row.agent_name === filterAgent;
+  const supervisorFilterFn = (row: DataRow) => filterSupervisor === "All" || row.mapping?.supervisor === filterSupervisor;
+  const waveFilterFn = (row: DataRow) => filterWave === "All" || row.mapping?.wave === filterWave;
+  const categoryFilterFn = (row: DataRow) => filterCategory === "All" || row.mapping?.category === filterCategory;
+  const queueFilterFn = (row: DataRow) => filterQueue === "All" || row.mapping?.queue === filterQueue;
 
   const overviewFiltered = useMemo(() => {
-    const filter = (row: any) => vendorFilterFn(row) && languageFilterFn(row) && weekFilterFn(row) && typeFilterFn(row);
+    const filter = (row: DataRow) => vendorFilterFn(row) && languageFilterFn(row) && weekFilterFn(row) && typeFilterFn(row);
     return {
       email: overviewData.email.filter(filter),
       chat: overviewData.chat.filter(filter),
@@ -215,7 +308,7 @@ export default function Dashboard() {
 
   const agentWiseFiltered = useMemo(() => {
     return agentWiseData.filter(
-      (row: any) =>
+      (row: DataRow) =>
         vendorFilterFn(row) &&
         languageFilterFn(row) &&
         weekFilterFn(row) &&
@@ -227,7 +320,7 @@ export default function Dashboard() {
 
   const ahtFiltered = useMemo(() => {
     return ahtData.filter(
-      (row: any) =>
+      (row: DataRow) =>
         vendorFilterFn(row) &&
         languageFilterFn(row) &&
         weekFilterFn(row) &&
@@ -241,7 +334,7 @@ export default function Dashboard() {
 
   const csatFiltered = useMemo(() => {
     return csatData.filter(
-      (row: any) =>
+      (row: DataRow) =>
         vendorFilterFn(row) &&
         languageFilterFn(row) &&
         weekFilterFn(row) &&
@@ -252,11 +345,11 @@ export default function Dashboard() {
   }, [csatData, filterVendor, filterLanguage, filterWeek, filterAgentType, filterAgent, filterSupervisor]);
 
   const qaFiltered = useMemo(() => {
-    return qaData.filter((row: any) => vendorFilterFn(row) && languageFilterFn(row) && weekFilterFn(row) && typeFilterFn(row));
+    return qaData.filter((row: DataRow) => vendorFilterFn(row) && languageFilterFn(row) && weekFilterFn(row) && typeFilterFn(row));
   }, [qaData, filterVendor, filterLanguage, filterWeek, filterAgentType]);
 
-  const summaryForChannel = (rows: any[]) => {
-    const numeric = (field: string) =>
+  const summaryForChannel = (rows: DataRow[]) => {
+    const numeric = (field: keyof DataRow) =>
       rows.reduce((sum, row) => sum + Number(row[field] ?? 0), 0) / Math.max(rows.length, 1);
     return {
       avgAht: numeric("aht") || numeric("w1") || numeric("avg_aht"),
@@ -267,8 +360,9 @@ export default function Dashboard() {
   };
 
   const ahtTrendData = useMemo(() => {
-    const grouping = new Map<string, any>();
-    ahtFiltered.forEach((row: any) => {
+    type TrendRow = { name: string; w1: number; w2: number; w3: number; w4: number; count: number };
+    const grouping = new Map<string, TrendRow>();
+    ahtFiltered.forEach((row: DataRow) => {
       const label = row.agent_name || row.mapping?.agent_name || "Unknown";
       const existing = grouping.get(label) ?? { name: label, w1: 0, w2: 0, w3: 0, w4: 0, count: 0 };
       existing.w1 += Number(row.w1 ?? row.aht_w1 ?? 0);
@@ -298,9 +392,9 @@ export default function Dashboard() {
 
   const csatSummary = useMemo(() => {
     const total = csatFiltered.length;
-    const dsat = csatFiltered.filter((row: any) => Number(row.survey_rating) <= 3).length;
-    const csat = csatFiltered.filter((row: any) => Number(row.survey_rating) >= 4).length;
-    const avg = csatFiltered.reduce((sum: number, row: any) => sum + Number(row.survey_rating ?? 0), 0) / Math.max(total, 1);
+    const dsat = csatFiltered.filter((row: DataRow) => Number(row.survey_rating) <= 3).length;
+    const csat = csatFiltered.filter((row: DataRow) => Number(row.survey_rating) >= 4).length;
+    const avg = csatFiltered.reduce((sum: number, row: DataRow) => sum + Number(row.survey_rating ?? 0), 0) / Math.max(total, 1);
     return {
       avgCSAT: avg,
       total,
@@ -311,19 +405,19 @@ export default function Dashboard() {
   }, [csatFiltered]);
 
   const qaSummary = useMemo(() => {
-    const rows = qaFiltered.filter((row: any) => qaVendorTab === "overall" || row.mapping?.vendor?.toLowerCase().includes(qaVendorTab.replace("vendor", "")));
-    const allScores = rows.map((row: any) => Number(row.score ?? 0));
-    const vendor = rows.filter((row: any) => row.reviewer?.toLowerCase() !== "quality assurance");
-    const flix = rows.filter((row: any) => row.reviewer?.toLowerCase() === "quality assurance");
+    const rows = qaFiltered.filter((row: DataRow) => qaVendorTab === "overall" || row.mapping?.vendor?.toLowerCase().includes(qaVendorTab.replace("vendor", "")));
+    const allScores = rows.map((row: DataRow) => Number(row.score ?? 0));
+    const vendor = rows.filter((row: DataRow) => row.reviewer?.toLowerCase() !== "quality assurance");
+    const flix = rows.filter((row: DataRow) => row.reviewer?.toLowerCase() === "quality assurance");
     const avgVendor = (vendor.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(vendor.length, 1)) * 100;
     const avgFlix = (flix.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / Math.max(flix.length, 1)) * 100;
-    const discrepancyCases = rows.filter((row: any) => Math.abs(Number(row.score ?? 0) - Number(row.vendor_score ?? 0)) > 0.05).length;
+    const discrepancyCases = rows.filter((row: DataRow) => Math.abs(Number(row.score ?? 0) - Number(row.vendor_score ?? 0)) > 0.05).length;
     return {
       avgVendor: Number(avgVendor.toFixed(1)),
       avgFlix: Number(avgFlix.toFixed(1)),
       discrepancyRate: Math.round((discrepancyCases / Math.max(rows.length, 1)) * 100),
-      ztCount: rows.filter((row: any) => row.flag === "ZT" || row.case_status === "ZT").length,
-      below85: rows.filter((row: any) => Number(row.score ?? 0) < 0.85).length,
+      ztCount: rows.filter((row: DataRow) => row.flag === "ZT" || row.case_status === "ZT").length,
+      below85: rows.filter((row: DataRow) => Number(row.score ?? 0) < 0.85).length,
       trend: [
         { week: "W1", vendor: avgVendor + 2, flix: avgFlix + 1 },
         { week: "W2", vendor: avgVendor + 1, flix: avgFlix + 2 },
@@ -331,7 +425,7 @@ export default function Dashboard() {
         { week: "W4", vendor: avgVendor + 2, flix: avgFlix + 3 },
       ],
       matchedCases: rows.slice(0, 6),
-      agentRows: Object.values(rows.reduce((acc: any, row: any) => {
+      agentRows: Object.values(rows.reduce((acc: Record<string, QaAgentRow>, row: DataRow) => {
         const key = row.agent_name || "Unknown";
         acc[key] = acc[key] || { name: key, w1: 0, w2: 0, w3: 0, w4: 0, count: 0 };
         acc[key].w1 += Number(row.w1 ?? row.score ?? 0);
@@ -340,7 +434,7 @@ export default function Dashboard() {
         acc[key].w4 += Number(row.w4 ?? 0);
         acc[key].count += 1;
         return acc;
-      }, {} as any)),
+      }, {} as Record<string, QaAgentRow>)),
       comments: [
         { theme: "Response quality", count: 18 },
         { theme: "Documentation", count: 12 },
@@ -356,7 +450,7 @@ export default function Dashboard() {
 
   const csatRootCauseData = useMemo(() => {
     const groups: Record<string, number> = { agent: 0, process: 0, product: 0 };
-    csatFiltered.forEach((row: any) => {
+    csatFiltered.forEach((row: DataRow) => {
       const rating = Number(row.survey_rating);
       if (rating <= 3) {
         groups[row.root_cause?.toLowerCase() === "process" ? "process" : row.root_cause?.toLowerCase() === "product" ? "product" : "agent"] += 1;
@@ -460,7 +554,7 @@ export default function Dashboard() {
                         {section.data.length === 0 ? (
                           <tr><td colSpan={13} className="px-3 py-6 text-center text-slate-500">No rows for this selection.</td></tr>
                         ) : (
-                          section.data.map((row: any, index: number) => (
+                          section.data.map((row: DataRow, index: number) => (
                             <tr key={`${section.title}-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.mapping?.vendor || row.vendor || "Unknown"}</td>
                               <td className="border-b border-slate-200 px-3 py-3">{formatNumber(row.w1)}</td>
@@ -519,7 +613,7 @@ export default function Dashboard() {
                     <tbody>
                       {agentWiseFiltered.length === 0 ? (
                         <tr><td colSpan={agentScreen === 1 ? 14 : 13} className="px-3 py-6 text-center text-slate-500">No matching agents.</td></tr>
-                      ) : agentWiseFiltered.slice(0, 12).map((row: any, idx: number) => (
+                      ) : agentWiseFiltered.slice(0, 12).map((row: DataRow, idx: number) => (
                         <tr key={`agent-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                           <td className="border-b border-slate-200 px-3 py-3 font-medium">{row.agent_name}</td>
                           <td className="border-b border-slate-200 px-3 py-3">{row.mapping?.agent_type || row.agent_type}</td>
@@ -689,8 +783,8 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {csatFiltered.slice(0, 8).map((row: any, idx: number) => {
-                          const dsatShare = row.survey_rating <= 3 ? "100%" : "0%";
+                        {csatFiltered.slice(0, 8).map((row: DataRow, idx: number) => {
+                          const dsatShare = Number(row.survey_rating) <= 3 ? "100%" : "0%";
                           return (
                             <tr key={`dsat-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium">{row.agent_name}</td>
@@ -706,7 +800,7 @@ export default function Dashboard() {
               </div>
             ) : csatTab === "training" ? (
               <div className="grid gap-4 lg:grid-cols-3">
-                {csatFiltered.slice(0, 6).map((row: any, idx: number) => (
+                {csatFiltered.slice(0, 6).map((row: DataRow, idx: number) => (
                   <div key={`training-${idx}`} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm font-semibold text-slate-800">{row.agent_name || "Agent"}</p>
                     <span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${Number(row.survey_rating) <= 2 ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>Critical</span>
@@ -728,8 +822,8 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {csatFiltered.slice(0, 10).map((row: any, idx: number) => {
-                        const dsatRate = Number(row.dsat_rate ?? Math.round((row.survey_rating <= 3 ? 100 : 0)));
+                      {csatFiltered.slice(0, 10).map((row: DataRow, idx: number) => {
+                        const dsatRate = Number(row.dsat_rate ?? Math.round((Number(row.survey_rating) <= 3 ? 100 : 0)));
                         return (
                           <tr key={`breakdown-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                             <td className="border-b border-slate-200 px-3 py-3 font-medium">{row.category || "General"}</td>
@@ -761,7 +855,7 @@ export default function Dashboard() {
                 <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="mb-4 text-lg font-semibold text-slate-900">Verbatim review</h3>
                   <div className="space-y-3 text-sm text-slate-600">
-                    {csatFiltered.slice(0, 5).map((row: any, idx: number) => (
+                    {csatFiltered.slice(0, 5).map((row: DataRow, idx: number) => (
                       <div key={`verbatim-${idx}`} className="rounded-2xl bg-slate-50 p-4">
                         <p className="font-medium text-slate-900">{row.agent_name || "Agent"}</p>
                         <p className="mt-2">{row.comment || row.verbatim || "No detailed comment available."}</p>
@@ -846,7 +940,7 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {qaSummary.matchedCases.map((row: any, idx: number) => (
+                          {qaSummary.matchedCases.map((row: DataRow, idx: number) => (
                             <tr key={`match-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium">{row.agent_name}</td>
                               <td className="border-b border-slate-200 px-3 py-3">{formatNumber(Number(row.score ?? 0) * 100)}%</td>
@@ -873,7 +967,7 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {qaSummary.agentRows.slice(0, 8).map((agent: any, idx: number) => (
+                          {qaSummary.agentRows.slice(0, 8).map((agent: QaAgentRow, idx: number) => (
                             <tr key={`qa-agent-${idx}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                               <td className="border-b border-slate-200 px-3 py-3 font-medium">{agent.name}</td>
                               <td className="border-b border-slate-200 px-3 py-3">{formatNumber((agent.w1 / Math.max(agent.count, 1)) * 100)}%</td>
