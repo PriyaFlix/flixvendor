@@ -344,9 +344,8 @@ export default function Dashboard() {
       setLoadingCsat(true);
       setLoadingQa(true);
 
-      const [mappingRes, emailRes] = await Promise.all([
+      const [mappingRes] = await Promise.all([
         supabase.from("agent_mapping").select("*").limit(50000),
-        supabase.from("email_aht").select("*").limit(50000),
       ]);
 
       const fetchTableBatches = async (tableName: string) => {
@@ -372,23 +371,25 @@ export default function Dashboard() {
         return rows;
       };
 
-      const [chatRows, csatRows, qaRows] = await Promise.all([
+      const [emailRows, chatRows, csatRows, qaRows] = await Promise.all([
+        fetchTableBatches("email_aht"),
         fetchTableBatches("chat_call_aht"),
         fetchTableBatches("csat_data"),
         fetchTableBatches("qa_scores"),
       ]);
 
       console.log("Supabase mappingRes:", mappingRes);
-      console.log("Supabase emailRes:", emailRes);
+      console.log("Raw email_aht fetched rows:", emailRows.length);
+      console.log("Raw email_aht first 5 items:", emailRows.slice(0, 5));
       console.log("Raw chat_call_aht fetched rows:", chatRows.length);
       console.log("Raw chat_call_aht first 5 items:", chatRows.slice(0, 5));
       console.log("Raw csat_data fetched rows:", csatRows.length);
       console.log("Raw qa_scores fetched rows:", qaRows.length);
 
       if (mappingRes.data) setMapping(mappingRes.data);
-      const emailRows = emailRes.data ?? [];
+      const mergedEmail = mergeWithMapping(emailRows, mappingRes.data ?? []);
       const mergedChatCall = mergeWithMapping(chatRows, mappingRes.data ?? []);
-      const mergedCsat = mergeWithMapping(csatRows, mappingRes.data ?? []);
+      const mergedCsat = mergeWithMapping(csatRows, mappingRes.data ?? [],);
       const mergedQa = mergeWithMapping(qaRows, mappingRes.data ?? []);
 
       // Filter out csat rows without team_name
@@ -444,8 +445,28 @@ export default function Dashboard() {
       }));
       console.log("Grouped qaAggRows:", qaAggRows);
 
+      const emailAggMap = new Map<string, { vendor: string; week: string; sum: number; count: number }>();
+      (emailRows as DataRow[]).forEach((row) => {
+        const vendor = row.vendor?.trim() || "Unknown";
+        const wk = getRowWeek(row);
+        if (!vendor || !wk) return;
+        const key = `${vendor}||${wk}`;
+        const value = toNumber(row.handle_time);
+        if (row.handle_time == null) return;
+        const existing = emailAggMap.get(key) ?? { vendor, week: wk, sum: 0, count: 0 };
+        existing.sum += value;
+        existing.count += 1;
+        emailAggMap.set(key, existing);
+      });
+      const emailAggRows: DataRow[] = Array.from(emailAggMap.values()).map((item) => ({
+        vendor: item.vendor,
+        week: item.week,
+        handle_time: item.count ? item.sum / item.count : 0,
+      }));
+      console.log("Grouped emailAggRows:", emailAggRows);
+
       setOverviewData({
-        email: emailRows,
+        email: emailAggRows,
         chat: chatAggRows.filter((row) => row.agent_team?.trim() !== ""),
         call: mergedChatCall.filter((row) => row.channel?.toLowerCase() === "call" || row.type?.toLowerCase() === "call"),
       });
