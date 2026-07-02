@@ -172,6 +172,7 @@ type QaSummary = {
 const GOOD = "#34D399";
 const BAD = "#F87171";
 const NEUTRAL = "#A3A3A3";
+const AHT_TARGET_SECONDS = 600;
 
 function getChip(value: number | string | undefined, positive?: boolean) {
   if (value == null || value === "All") return "bg-slate-200 text-slate-900";
@@ -186,9 +187,62 @@ function formatNumber(value: number | string | undefined) {
   return Number.isFinite(numeric) ? numeric.toFixed(1) : "—";
 }
 
+function formatAhtMinutes(value: number | string | undefined) {
+  if (value == null || value === "") return "—";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  return `${(numeric / 60).toFixed(1)}m`;
+}
+
+function getAhtChipClass(value: number | string | undefined) {
+  if (value == null || value === "") return "bg-slate-200 text-slate-900";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "bg-slate-200 text-slate-900";
+  return numeric < AHT_TARGET_SECONDS ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
+}
+
+function getPercentChipClass(value: number | string | undefined) {
+  if (value == null || value === "") return "bg-slate-200 text-slate-900";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "bg-slate-200 text-slate-900";
+  return numeric >= 85 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
+}
+
 function renderValue(value: number | string | undefined) {
   if (value == null || value === "" || Number.isNaN(Number(value))) return "—";
   return formatNumber(value);
+}
+
+function pivotWeeklyRowsWithWeeks(
+  rows: DataRow[],
+  keyFn: (row: DataRow) => string,
+  valueFn: (row: DataRow) => number,
+  weeks: string[],
+) {
+  const pivotMap = new Map<string, { sums: number[]; counts: number[]; key: string }>();
+
+  rows.forEach((row) => {
+    const key = keyFn(row);
+    const week = getRowWeek(row);
+    const index = weeks.indexOf(week);
+    if (!key || index < 0) return;
+
+    const pivot = pivotMap.get(key) ?? { key, sums: Array(weeks.length).fill(0), counts: Array(weeks.length).fill(0) };
+    pivot.sums[index] += valueFn(row);
+    pivot.counts[index] += 1;
+    pivotMap.set(key, pivot);
+  });
+
+  return {
+    weeks,
+    rows: Array.from(pivotMap.values()).map((item) => {
+      const values = item.sums.map((sum, idx) => (item.counts[idx] ? sum / item.counts[idx] : undefined));
+      return {
+        name: item.key,
+        values,
+      };
+    }),
+  };
 }
 
 function mergeWithMapping(rows: DataRow[], mapping: MappingRow[]) {
@@ -515,7 +569,7 @@ export default function Dashboard() {
 
   const getAgentKey = (row: DataRow) => row.agent_name || "Unknown";
 
-  const uniqueWeeks = useMemo(() => {
+  const overviewWeeks = useMemo(() => {
     const allWeeks = [
       ...overviewData.email,
       ...overviewData.chat,
@@ -525,7 +579,7 @@ export default function Dashboard() {
     ]
       .map(getRowWeek)
       .filter(Boolean);
-    return ["All", ...Array.from(new Set(allWeeks)).sort((a, b) => Number(a) - Number(b))];
+    return Array.from(new Set(allWeeks)).sort((a, b) => Number(a) - Number(b)).slice(-4);
   }, [overviewData, csatData, qaData]);
 
   const uniqueAgentTypes = useMemo(() => {
@@ -604,6 +658,8 @@ export default function Dashboard() {
     };
   }, [overviewData, filterVendor, filterLanguage, filterWeek, filterAgentType]);
 
+  const sectionWeeks = overviewWeeks.length ? overviewWeeks : ["W1", "W2", "W3", "W4"];
+
   const agentWiseFiltered = useMemo(() => {
     return agentWiseData.filter(
       (row: DataRow) =>
@@ -648,48 +704,57 @@ export default function Dashboard() {
 
   const emailVendorPivot = useMemo(
     () =>
-      pivotWeeklyRows(
+      pivotWeeklyRowsWithWeeks(
         overviewFiltered.email,
         getVendorKey,
         (row) => toNumber(row.handle_time ?? row.avg_handling_time ?? row.aht ?? row.w1),
+        overviewWeeks,
       ),
-    [overviewFiltered.email],
+    [overviewFiltered.email, overviewWeeks],
   );
 
-  const chatAgentTeamPivot = useMemo(
+  const chatVendorPivot = useMemo(
     () =>
-      pivotWeeklyRows(
+      pivotWeeklyRowsWithWeeks(
         overviewFiltered.chat,
-        getChatAgentTeamKey,
+        getVendorKey,
         (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1),
+        overviewWeeks,
       ),
-    [overviewFiltered.chat],
+    [overviewFiltered.chat, overviewWeeks],
   );
 
   const callVendorPivot = useMemo(
     () =>
-      pivotWeeklyRows(
+      pivotWeeklyRowsWithWeeks(
         overviewFiltered.call,
         getVendorKey,
         (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1),
+        overviewWeeks,
       ),
-    [overviewFiltered.call],
+    [overviewFiltered.call, overviewWeeks],
   );
 
   const csatVendorPivot = useMemo(
     () =>
-      pivotWeeklyRows(csatFiltered, getVendorKey, (row) => toNumber(row.survey_rating ?? row.avg_csat)),
-    [csatFiltered],
+      pivotWeeklyRowsWithWeeks(
+        csatFiltered,
+        getVendorKey,
+        (row) => toNumber(row.survey_rating ?? row.avg_csat),
+        overviewWeeks,
+      ),
+    [csatFiltered, overviewWeeks],
   );
 
-  const qaPartnerPivot = useMemo(
+  const qaVendorPivot = useMemo(
     () =>
-      pivotWeeklyRows(
+      pivotWeeklyRowsWithWeeks(
         qaFiltered,
-        getPartnerKey,
+        getVendorKey,
         (row) => toNumber(row.evaluation ?? 0),
+        overviewWeeks,
       ),
-    [qaFiltered],
+    [qaFiltered, overviewWeeks],
   );
 
   const agentAhtPivot = useMemo(
@@ -987,7 +1052,7 @@ export default function Dashboard() {
               ))}
             </select>
             <select className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" value={filterWeek} onChange={(e) => setFilterWeek(e.target.value)}>
-              {uniqueWeeks.map((option) => (
+              {overviewWeeks.map((option) => (
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
@@ -1030,174 +1095,119 @@ export default function Dashboard() {
               <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-slate-500">Loading overview...</div>
             ) : (
               <>
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Email AHT by vendor</h2>
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="mb-2">
+                    <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Vendor overview</p>
+                    <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Weekly performance across all vendors and channels</h2>
                   </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Vendor</th>
-                          {emailVendorPivot.weeks.map((week) => (
-                            <th key={`email-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {emailVendorPivot.rows.length === 0 ? (
-                          <tr><td colSpan={emailVendorPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No email AHT data available.</td></tr>
-                        ) : (
-                          emailVendorPivot.rows.map((row, index) => (
-                            <tr key={`email-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {row.values.map((value, valueIndex) => (
-                                <td key={`${row.name}-email-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Chat AHT by agent team</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent team</th>
-                          {chatAgentTeamPivot.weeks.map((week) => (
-                            <th key={`chat-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {chatAgentTeamPivot.rows.length === 0 ? (
-                          <tr><td colSpan={chatAgentTeamPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No chat AHT data available.</td></tr>
-                        ) : (
-                          chatAgentTeamPivot.rows.map((row, index) => (
-                            <tr key={`chat-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {row.values.map((value, valueIndex) => (
-                                <td key={`${row.name}-chat-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Call AHT by agent team</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Vendor</th>
-                          {callVendorPivot.weeks.map((week) => (
-                            <th key={`call-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {callVendorPivot.rows.length === 0 ? (
-                          <tr><td colSpan={callVendorPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No call AHT data available.</td></tr>
-                        ) : (
-                          callVendorPivot.rows.map((row, index) => (
-                            <tr key={`call-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {row.values.map((value, valueIndex) => (
-                                <td key={`${row.name}-call-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <label className="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Vendor</label>
+                      <select className="mt-2 w-full bg-transparent text-slate-900 outline-none" value={filterVendor} onChange={(e) => setFilterVendor(e.target.value)}>
+                        {uniqueVendors.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <label className="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Language</label>
+                      <select className="mt-2 w-full bg-transparent text-slate-900 outline-none" value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
+                        {uniqueLanguages.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <label className="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Time period</label>
+                      <select className="mt-2 w-full bg-transparent text-slate-900 outline-none" value={filterWeek} onChange={(e) => setFilterWeek(e.target.value)}>
+                        {overviewWeeks.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <label className="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Agent type</label>
+                      <select className="mt-2 w-full bg-transparent text-slate-900 outline-none" value={filterAgentType} onChange={(e) => setFilterAgentType(e.target.value)}>
+                        {uniqueAgentTypes.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Avg CSAT score by vendor</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Vendor</th>
-                          {csatVendorPivot.weeks.map((week) => (
-                            <th key={`csat-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {csatVendorPivot.rows.length === 0 ? (
-                          <tr><td colSpan={csatVendorPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No CSAT data available.</td></tr>
-                        ) : (
-                          csatVendorPivot.rows.map((row, index) => (
-                            <tr key={`csat-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {row.values.map((value, valueIndex) => (
-                                <td key={`${row.name}-csat-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}
-                                </td>
-                              ))}
+                {[
+                  { id: "call", label: "CALL", color: "bg-amber-100 text-amber-800", rows: callVendorPivot.rows },
+                  { id: "email", label: "EMAIL", color: "bg-sky-100 text-sky-800", rows: emailVendorPivot.rows },
+                  { id: "chat", label: "CHAT", color: "bg-violet-100 text-violet-800", rows: chatVendorPivot.rows },
+                ].map((section) => (
+                  <div key={section.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between border-b border-slate-200 px-6 py-4 bg-slate-50">
+                      <div className="flex items-center gap-3">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${section.color}`}>{section.label}</span>
+                        <h3 className="text-lg font-semibold text-slate-900">{section.label} vendor performance</h3>
+                      </div>
+                    </div>
+                    <div className="overflow-auto px-6 py-4">
+                      <table className="min-w-full border-collapse text-left text-sm text-slate-700">
+                        <thead>
+                          <tr>
+                            <th className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-900">Vendor</th>
+                            <th colSpan={sectionWeeks.length} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-900">AHT</th>
+                            <th colSpan={sectionWeeks.length} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-900">CSAT</th>
+                            <th colSpan={sectionWeeks.length} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-900">QA</th>
+                          </tr>
+                          <tr>
+                            <th className="sr-only">Vendor</th>
+                            {sectionWeeks.map((week) => (
+                              <th key={`${section.id}-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-600">{week}</th>
+                            ))}
+                            {sectionWeeks.map((week) => (
+                              <th key={`${section.id}-csat-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-600">{week}</th>
+                            ))}
+                            {sectionWeeks.map((week) => (
+                              <th key={`${section.id}-qa-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-600">{week}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {section.rows.length === 0 ? (
+                            <tr>
+                              <td colSpan={1 + sectionWeeks.length * 3} className="px-3 py-6 text-center text-slate-500">No {section.label.toLowerCase()} data available.</td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            section.rows.map((row, index) => (
+                              <tr key={`${section.id}-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
+                                <td className="border-b border-slate-200 px-3 py-3 font-semibold text-slate-900">{row.name}</td>
+                                {sectionWeeks.map((weekIndex, cellIndex) => (
+                                  <td key={`${section.id}-aht-${row.name}-${cellIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getAhtChipClass(row.values?.[cellIndex])}`}>
+                                      {formatAhtMinutes(row.values?.[cellIndex])}
+                                    </span>
+                                  </td>
+                                ))}
+                                {sectionWeeks.map((weekIndex, cellIndex) => (
+                                  <td key={`${section.id}-csat-${row.name}-${cellIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getPercentChipClass(csatVendorPivot.rows.find((r) => r.name === row.name)?.values?.[cellIndex])}`}>
+                                      {formatNumber(csatVendorPivot.rows.find((r) => r.name === row.name)?.values?.[cellIndex])}%
+                                    </span>
+                                  </td>
+                                ))}
+                                {sectionWeeks.map((weekIndex, cellIndex) => (
+                                  <td key={`${section.id}-qa-${row.name}-${cellIndex}`} className="border-b border-slate-200 px-3 py-3">
+                                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getPercentChipClass(qaVendorPivot.rows.find((r) => r.name === row.name)?.values?.[cellIndex])}`}>
+                                      {formatNumber(qaVendorPivot.rows.find((r) => r.name === row.name)?.values?.[cellIndex])}%
+                                    </span>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">QA evaluation by partner</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Partner</th>
-                          {qaPartnerPivot.weeks.map((week) => (
-                            <th key={`qa-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {qaPartnerPivot.rows.length === 0 ? (
-                          <tr><td colSpan={qaPartnerPivot.weeks.length + 1} className="px-3 py-6 text-center text-slate-500">No QA data available.</td></tr>
-                        ) : (
-                          qaPartnerPivot.rows.map((row, index) => (
-                            <tr key={`qa-partner-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {row.values.map((value, valueIndex) => (
-                                <td key={`${row.name}-qa-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}%
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                ))}
               </>
             )}
           </div>
