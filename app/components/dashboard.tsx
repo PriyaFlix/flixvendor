@@ -344,25 +344,23 @@ export default function Dashboard() {
       setLoadingCsat(true);
       setLoadingQa(true);
 
-      const [mappingRes, emailRes, csatRes, qaRes] = await Promise.all([
+      const [mappingRes, emailRes] = await Promise.all([
         supabase.from("agent_mapping").select("*").limit(50000),
         supabase.from("email_aht").select("*").limit(50000),
-        supabase.from("csat_data").select("*").limit(50000),
-        supabase.from("qa_scores").select("*").limit(50000),
       ]);
 
-      const fetchChatBatches = async () => {
+      const fetchTableBatches = async (tableName: string) => {
         const rows: DataRow[] = [];
         const batchSize = 1000;
         let start = 0;
 
         while (true) {
           const { data, error } = await supabase
-            .from("chat_call_aht")
+            .from(tableName)
             .select("*")
             .range(start, start + batchSize - 1);
           if (error) {
-            console.error("Error fetching chat_call_aht batch:", error);
+            console.error(`Error fetching ${tableName} batch:`, error);
             break;
           }
           if (!data || data.length === 0) break;
@@ -374,20 +372,24 @@ export default function Dashboard() {
         return rows;
       };
 
-      const chatRows = await fetchChatBatches();
+      const [chatRows, csatRows, qaRows] = await Promise.all([
+        fetchTableBatches("chat_call_aht"),
+        fetchTableBatches("csat_data"),
+        fetchTableBatches("qa_scores"),
+      ]);
 
       console.log("Supabase mappingRes:", mappingRes);
       console.log("Supabase emailRes:", emailRes);
-      console.log("Supabase qaRes:", qaRes);
-      console.log("Supabase csatRes:", csatRes);
       console.log("Raw chat_call_aht fetched rows:", chatRows.length);
       console.log("Raw chat_call_aht first 5 items:", chatRows.slice(0, 5));
+      console.log("Raw csat_data fetched rows:", csatRows.length);
+      console.log("Raw qa_scores fetched rows:", qaRows.length);
 
       if (mappingRes.data) setMapping(mappingRes.data);
       const emailRows = emailRes.data ?? [];
       const mergedChatCall = mergeWithMapping(chatRows, mappingRes.data ?? []);
-      const mergedCsat = mergeWithMapping(csatRes.data ?? [], mappingRes.data ?? []);
-      const mergedQa = mergeWithMapping(qaRes.data ?? [], mappingRes.data ?? []);
+      const mergedCsat = mergeWithMapping(csatRows, mappingRes.data ?? []);
+      const mergedQa = mergeWithMapping(qaRows, mappingRes.data ?? []);
 
       // Filter out csat rows without team_name
       const filteredCsat = (mergedCsat as DataRow[]).filter((r) => r.team_name?.trim() !== "");
