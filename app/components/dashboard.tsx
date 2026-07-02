@@ -344,23 +344,48 @@ export default function Dashboard() {
       setLoadingCsat(true);
       setLoadingQa(true);
 
-      const [mappingRes, emailRes, chatRes, csatRes, qaRes] = await Promise.all([
+      const [mappingRes, emailRes, csatRes, qaRes] = await Promise.all([
         supabase.from("agent_mapping").select("*").limit(50000),
         supabase.from("email_aht").select("*").limit(50000),
-        supabase.from("chat_call_aht").select("*").limit(50000),
         supabase.from("csat_data").select("*").limit(50000),
         supabase.from("qa_scores").select("*").limit(50000),
       ]);
 
+      const fetchChatBatches = async () => {
+        const rows: DataRow[] = [];
+        const batchSize = 1000;
+        let start = 0;
+
+        while (true) {
+          const { data, error } = await supabase
+            .from("chat_call_aht")
+            .select("*")
+            .range(start, start + batchSize - 1);
+          if (error) {
+            console.error("Error fetching chat_call_aht batch:", error);
+            break;
+          }
+          if (!data || data.length === 0) break;
+          rows.push(...data);
+          if (data.length < batchSize) break;
+          start += batchSize;
+        }
+
+        return rows;
+      };
+
+      const chatRows = await fetchChatBatches();
+
       console.log("Supabase mappingRes:", mappingRes);
       console.log("Supabase emailRes:", emailRes);
-      console.log("Supabase chatRes:", chatRes);
-      console.log("Supabase csatRes:", csatRes);
       console.log("Supabase qaRes:", qaRes);
+      console.log("Supabase csatRes:", csatRes);
+      console.log("Raw chat_call_aht fetched rows:", chatRows.length);
+      console.log("Raw chat_call_aht first 5 items:", chatRows.slice(0, 5));
 
       if (mappingRes.data) setMapping(mappingRes.data);
       const emailRows = emailRes.data ?? [];
-      const mergedChatCall = mergeWithMapping(chatRes.data ?? [], mappingRes.data ?? []);
+      const mergedChatCall = mergeWithMapping(chatRows, mappingRes.data ?? []);
       const mergedCsat = mergeWithMapping(csatRes.data ?? [], mappingRes.data ?? []);
       const mergedQa = mergeWithMapping(qaRes.data ?? [], mappingRes.data ?? []);
 
@@ -370,13 +395,19 @@ export default function Dashboard() {
       // Aggregate chat AHT per agent_team and week (SQL equivalent client-side)
       const chatAggMap = new Map<string, { team: string; week: string; vendor?: string; sum: number; count: number }>();
       (mergedChatCall as DataRow[]).forEach((row) => {
-        const team = row.agent_team ?? "Unknown";
+        const team = row.agent_team?.trim() || row.mapping?.vendor?.trim() || row.team_name?.trim() || "Unknown";
         const wk = getRowWeek(row);
-        if (!team || !wk) return;
+        if (!wk) return;
         const key = `${team}||${wk}`;
         const value = toNumber(row.avg_handling_time);
-        if (value === 0 && row.avg_handling_time == null) return;
-        const existing = chatAggMap.get(key) ?? { team, week: wk, vendor: row.vendor ?? row.mapping?.vendor, sum: 0, count: 0 };
+        if (row.avg_handling_time == null) return;
+        const existing = chatAggMap.get(key) ?? {
+          team,
+          week: wk,
+          vendor: row.vendor ?? row.mapping?.vendor ?? row.team_name ?? row.agent_team,
+          sum: 0,
+          count: 0,
+        };
         existing.sum += value;
         existing.count += 1;
         chatAggMap.set(key, existing);
