@@ -110,7 +110,9 @@ type DataRow = {
   agent_type?: string;
   supervisor?: string;
   category?: string;
+  queue?: string;
   issue_focus?: string;
+  wave?: string;
   dsat_rate?: number | string;
   avg_csat?: number | string;
   severity?: string;
@@ -343,71 +345,79 @@ export default function Dashboard() {
       setLoadingQa(true);
 
       const [mappingRes, emailRes, chatRes, csatRes, qaRes] = await Promise.all([
-        supabase.from("agent_mapping").select("*").limit(1000),
-        supabase.from("email_aht").select("*").limit(1000),
-        supabase.from("chat_call_aht").select("*").limit(1000),
-        supabase.from("csat_data").select("*").limit(1000),
-        supabase.from("qa_scores").select("*").limit(1000),
+        supabase.from("agent_mapping").select("*").limit(10000),
+        supabase.from("email_aht").select("*").limit(10000),
+        supabase.from("chat_call_aht").select("*").limit(10000),
+        supabase.from("csat_data").select("*").limit(10000),
+        supabase.from("qa_scores").select("*").limit(10000),
       ]);
 
+      console.log("Supabase mappingRes:", mappingRes);
+      console.log("Supabase emailRes:", emailRes);
+      console.log("Supabase chatRes:", chatRes);
+      console.log("Supabase csatRes:", csatRes);
+      console.log("Supabase qaRes:", qaRes);
+
       if (mappingRes.data) setMapping(mappingRes.data);
-      const mergedEmail = mergeWithMapping(emailRes.data ?? [], mappingRes.data ?? []);
+      const emailRows = emailRes.data ?? [];
       const mergedChatCall = mergeWithMapping(chatRes.data ?? [], mappingRes.data ?? []);
       const mergedCsat = mergeWithMapping(csatRes.data ?? [], mappingRes.data ?? []);
       const mergedQa = mergeWithMapping(qaRes.data ?? [], mappingRes.data ?? []);
 
       // Filter out csat rows without team_name
-      const filteredCsat = (mergedCsat as DataRow[]).filter((r) => Boolean(r.team_name));
+      const filteredCsat = (mergedCsat as DataRow[]).filter((r) => r.team_name?.trim() !== "");
 
       // Aggregate chat AHT per agent_team and week (SQL equivalent client-side)
-      const chatAggMap = new Map<string, { key: string; weekSums: Map<string, { sum: number; count: number }> }>();
+      const chatAggMap = new Map<string, { team: string; week: string; vendor?: string; sum: number; count: number }>();
       (mergedChatCall as DataRow[]).forEach((row) => {
-        const team = row.agent_team ?? row.mapping?.agent_name ?? "Unknown";
+        const team = row.agent_team ?? "Unknown";
         const wk = getRowWeek(row);
         if (!team || !wk) return;
-        const entry = chatAggMap.get(team) ?? { key: team, weekSums: new Map() };
-        const wkEntry = entry.weekSums.get(wk) ?? { sum: 0, count: 0 };
-        wkEntry.sum += toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1);
-        wkEntry.count += 1;
-        entry.weekSums.set(wk, wkEntry);
-        chatAggMap.set(team, entry);
+        const key = `${team}||${wk}`;
+        const value = toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1);
+        const existing = chatAggMap.get(key) ?? { team, week: wk, vendor: row.vendor ?? row.mapping?.vendor, sum: 0, count: 0 };
+        existing.sum += value;
+        existing.count += 1;
+        chatAggMap.set(key, existing);
       });
-      const chatAggRows: DataRow[] = [];
-      chatAggMap.forEach((entry) => {
-        entry.weekSums.forEach((wkVal, wk) => {
-          chatAggRows.push({ agent_team: entry.key, week: wk, avg_handling_time: wkVal.count ? wkVal.sum / wkVal.count : 0 });
-        });
-      });
+      const chatAggRows: DataRow[] = Array.from(chatAggMap.values()).map((item) => ({
+        agent_team: item.team,
+        week: item.week,
+        avg_handling_time: item.count ? item.sum / item.count : 0,
+        vendor: item.vendor,
+      }));
+      console.log("Grouped chatAggRows:", chatAggRows);
 
-      // Aggregate QA per partner and week, vendor QA only (exclude reviewer 'Quality assurance')
-      const qaAggMap = new Map<string, { key: string; weekSums: Map<string, { sum: number; count: number }> }>();
+      // Aggregate QA per partner and week, exclude reviewer 'Quality assurance'
+      const qaAggMap = new Map<string, { partner: string; week: string; sum: number; count: number }>();
       (mergedQa as DataRow[]).forEach((row) => {
-        if ((row.reviewer ?? "").toLowerCase() === "quality assurance") return; // exclude Flix QA
-        const partner = row.partner ?? row.mapping?.vendor ?? "Unknown";
+        if ((row.reviewer ?? "").toLowerCase() === "quality assurance") return;
+        const partner = row.partner ?? row.mapping?.vendor ?? row.vendor ?? "Unknown";
         const wk = getRowWeek(row);
         if (!partner || !wk) return;
-        const entry = qaAggMap.get(partner) ?? { key: partner, weekSums: new Map() };
-        const wkEntry = entry.weekSums.get(wk) ?? { sum: 0, count: 0 };
-        wkEntry.sum += toNumber(row.evaluation ?? row.score ?? 0);
-        wkEntry.count += 1;
-        entry.weekSums.set(wk, wkEntry);
-        qaAggMap.set(partner, entry);
+        const key = `${partner}||${wk}`;
+        const value = toNumber(row.evaluation ?? 0);
+        const existing = qaAggMap.get(key) ?? { partner, week: wk, sum: 0, count: 0 };
+        existing.sum += value;
+        existing.count += 1;
+        qaAggMap.set(key, existing);
       });
-      const qaAggRows: DataRow[] = [];
-      qaAggMap.forEach((entry) => {
-        entry.weekSums.forEach((wkVal, wk) => {
-          qaAggRows.push({ partner: entry.key, week: wk, evaluation: wkVal.count ? wkVal.sum / wkVal.count : 0 });
-        });
-      });
+      const qaAggRows: DataRow[] = Array.from(qaAggMap.values()).map((item) => ({
+        partner: item.partner,
+        week: item.week,
+        evaluation: item.count ? (item.sum / item.count) * 100 : 0,
+        vendor: item.partner,
+      }));
+      console.log("Grouped qaAggRows:", qaAggRows);
 
       setOverviewData({
-        email: mergedEmail,
-        chat: chatAggRows.filter((row) => (row as DataRow).agent_team && ((row as DataRow).agent_team as string).toLowerCase() !== ""),
+        email: emailRows,
+        chat: chatAggRows.filter((row) => row.agent_team?.trim() !== ""),
         call: mergedChatCall.filter((row) => row.channel?.toLowerCase() === "call" || row.type?.toLowerCase() === "call"),
       });
 
-      setAgentWiseData([...mergedEmail, ...mergedChatCall, ...mergedCsat, ...mergedQa]);
-      setAhtData([...mergedEmail, ...mergedChatCall]);
+      setAgentWiseData([...emailRows, ...mergedChatCall, ...mergedCsat, ...mergedQa]);
+      setAhtData([...emailRows, ...mergedChatCall]);
       setCsatData(filteredCsat);
       setQaData(qaAggRows);
 
@@ -422,21 +432,31 @@ export default function Dashboard() {
   }, []);
 
   const uniqueVendors = useMemo(() => {
-    return ["All", ...new Set(mapping.map((row) => row.vendor).filter(Boolean))];
-  }, [mapping]);
+    const values = new Set<string>();
+    mapping.forEach((row) => {
+      if (row.vendor) values.add(row.vendor);
+    });
+    [...overviewData.email, ...overviewData.chat, ...overviewData.call, ...qaData].forEach((row) => {
+      if (row.vendor) values.add(row.vendor);
+      if (row.team_name) values.add(row.team_name);
+      if (row.partner) values.add(row.partner);
+      if (row.agent_team) values.add(row.agent_team);
+    });
+    return ["All", ...Array.from(values).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))];
+  }, [mapping, overviewData.email, overviewData.chat, overviewData.call, qaData]);
 
   const uniqueLanguages = useMemo(() => {
     return ["All", ...new Set(mapping.map((row) => row.language).filter(Boolean))];
   }, [mapping]);
 
   const getVendorKey = (row: DataRow) =>
-    row.team_name || row.mapping?.vendor || row.vendor || row.agent_team || row.mapping?.agent_name || "Unknown";
+    row.vendor ?? row.team_name ?? row.mapping?.vendor ?? row.agent_team ?? row.mapping?.agent_name ?? "Unknown";
 
   const getChatAgentTeamKey = (row: DataRow) =>
     row.agent_team ?? "Unknown";
 
   const getPartnerKey = (row: DataRow) =>
-    row.partner || row.mapping?.vendor || row.vendor || row.mapping?.agent_name || "Unknown";
+    row.partner ?? row.mapping?.vendor ?? row.vendor ?? row.team_name ?? row.agent_team ?? row.mapping?.agent_name ?? "Unknown";
 
   const getAgentKey = (row: DataRow) => row.agent_name || "Unknown";
 
@@ -501,15 +521,24 @@ export default function Dashboard() {
     return ["All", ...new Set(mapping.map((row) => row.queue).filter(Boolean))];
   }, [mapping]);
 
-  const vendorFilterFn = (row: DataRow) => filterVendor === "All" || row.mapping?.vendor === filterVendor;
+  const vendorFilterFn = (row: DataRow) =>
+    filterVendor === "All" ||
+    row.vendor === filterVendor ||
+    row.team_name === filterVendor ||
+    row.partner === filterVendor ||
+    row.agent_team === filterVendor ||
+    row.mapping?.vendor === filterVendor;
   const languageFilterFn = (row: DataRow) => filterLanguage === "All" || row.mapping?.language === filterLanguage;
   const weekFilterFn = (row: DataRow) => filterWeek === "All" || getRowWeek(row) === filterWeek;
-  const typeFilterFn = (row: DataRow) => filterAgentType === "All" || row.mapping?.agent_type === filterAgentType;
+  const typeFilterFn = (row: DataRow) =>
+    filterAgentType === "All" || row.mapping?.agent_type === filterAgentType || row.agent_type === filterAgentType;
   const agentFilterFn = (row: DataRow) => filterAgent === "All" || row.agent_name === filterAgent;
-  const supervisorFilterFn = (row: DataRow) => filterSupervisor === "All" || row.mapping?.supervisor === filterSupervisor;
-  const waveFilterFn = (row: DataRow) => filterWave === "All" || row.mapping?.wave === filterWave;
-  const categoryFilterFn = (row: DataRow) => filterCategory === "All" || row.mapping?.category === filterCategory;
-  const queueFilterFn = (row: DataRow) => filterQueue === "All" || row.mapping?.queue === filterQueue;
+  const supervisorFilterFn = (row: DataRow) =>
+    filterSupervisor === "All" || row.mapping?.supervisor === filterSupervisor || row.supervisor === filterSupervisor;
+  const waveFilterFn = (row: DataRow) => filterWave === "All" || row.mapping?.wave === filterWave || row.wave === filterWave;
+  const categoryFilterFn = (row: DataRow) =>
+    filterCategory === "All" || row.mapping?.category === filterCategory || row.category === filterCategory;
+  const queueFilterFn = (row: DataRow) => filterQueue === "All" || row.mapping?.queue === filterQueue || row.queue === filterQueue;
 
   const overviewFiltered = useMemo(() => {
     const filter = (row: DataRow) => vendorFilterFn(row) && languageFilterFn(row) && weekFilterFn(row) && typeFilterFn(row);
@@ -603,7 +632,7 @@ export default function Dashboard() {
       pivotWeeklyRows(
         qaFiltered,
         getPartnerKey,
-        (row) => toNumber(row.evaluation ?? row.score ?? 0),
+        (row) => toNumber(row.evaluation ?? 0),
       ),
     [qaFiltered],
   );
@@ -1104,7 +1133,7 @@ export default function Dashboard() {
                               <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
                               {row.values.map((value, valueIndex) => (
                                 <td key={`${row.name}-qa-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value !== undefined ? value * 100 : undefined)}%
+                                  {formatNumber(value)}%
                                 </td>
                               ))}
                             </tr>
