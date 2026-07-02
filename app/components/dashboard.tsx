@@ -345,11 +345,11 @@ export default function Dashboard() {
       setLoadingQa(true);
 
       const [mappingRes, emailRes, chatRes, csatRes, qaRes] = await Promise.all([
-        supabase.from("agent_mapping").select("*").limit(10000),
-        supabase.from("email_aht").select("*").limit(10000),
-        supabase.from("chat_call_aht").select("*").limit(10000),
-        supabase.from("csat_data").select("*").limit(10000),
-        supabase.from("qa_scores").select("*").limit(10000),
+        supabase.from("agent_mapping").select("*").limit(50000),
+        supabase.from("email_aht").select("*").limit(50000),
+        supabase.from("chat_call_aht").select("*").limit(50000),
+        supabase.from("csat_data").select("*").limit(50000),
+        supabase.from("qa_scores").select("*").limit(50000),
       ]);
 
       console.log("Supabase mappingRes:", mappingRes);
@@ -374,7 +374,8 @@ export default function Dashboard() {
         const wk = getRowWeek(row);
         if (!team || !wk) return;
         const key = `${team}||${wk}`;
-        const value = toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1);
+        const value = toNumber(row.avg_handling_time);
+        if (value === 0 && row.avg_handling_time == null) return;
         const existing = chatAggMap.get(key) ?? { team, week: wk, vendor: row.vendor ?? row.mapping?.vendor, sum: 0, count: 0 };
         existing.sum += value;
         existing.count += 1;
