@@ -47,6 +47,11 @@ const ahtChannels = [
   { id: "call", label: "Call" },
 ] as const;
 
+const agentWiseScreens = [
+  { id: 1, label: "AHT" },
+  { id: 2, label: "Agent performance" },
+];
+
 // agentWiseScreens removed — vendor tabs are derived dynamically
 
 type MappingRow = {
@@ -197,6 +202,13 @@ function getAhtChipClass(value: number | string | undefined) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "bg-slate-200 text-slate-900";
   return numeric < AHT_TARGET_SECONDS ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
+}
+
+function getAgentAhtChipClass(value: number | string | undefined) {
+  if (value == null || value === "") return "bg-slate-200 text-slate-900";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "bg-slate-200 text-slate-900";
+  return numeric < 400 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
 }
 
 function getPercentChipClass(value: number | string | undefined) {
@@ -382,6 +394,7 @@ export default function Dashboard() {
   const [filterWave, setFilterWave] = useState("All");
   const [filterCategory, setFilterCategory] = useState("All");
   const [filterQueue, setFilterQueue] = useState("All");
+  const [filterChannel, setFilterChannel] = useState("All");
 
   const [mapping, setMapping] = useState<MappingRow[]>([]);
   const [overviewData, setOverviewData] = useState<OverviewData>({ email: [], chat: [], call: [] });
@@ -534,8 +547,8 @@ export default function Dashboard() {
         call: mergedChatCall.filter((row) => row.channel?.toLowerCase() === "call" || row.type?.toLowerCase() === "call"),
       });
 
-      setAgentWiseData([...emailRows, ...mergedChatCall, ...mergedCsat, ...mergedQa]);
-      setAhtData([...emailRows, ...mergedChatCall]);
+      setAgentWiseData([...mergedEmail, ...mergedChatCall, ...mergedCsat, ...mergedQa]);
+      setAhtData([...mergedEmail, ...mergedChatCall]);
       setCsatData(filteredCsat);
       setQaData(qaAggRows);
 
@@ -606,6 +619,16 @@ export default function Dashboard() {
   const uniqueWaves = useMemo(() => {
     return ["All", ...new Set(mapping.map((row) => row.wave).filter(Boolean))];
   }, [mapping]);
+
+  const mappingByAgent = useMemo(() => {
+    return mapping.reduce((acc: Record<string, MappingRow>, row: MappingRow) => {
+      if (row.agent_name) acc[row.agent_name] = row;
+      return acc;
+    }, {} as Record<string, MappingRow>);
+  }, [mapping]);
+
+  const supervisorList = uniqueSupervisors;
+  const waveList = uniqueWaves;
 
   const uniqueCategories = useMemo(() => {
     return ["All", ...new Set(mapping.map((row) => row.category).filter(Boolean))];
@@ -818,50 +841,52 @@ export default function Dashboard() {
     if (!vendorTab && vendorTabs.length) setVendorTab(vendorTabs[0] ?? "");
   }, [vendorTabs, vendorTab]);
 
-  const agentListByVendor = useMemo(() => {
-    return Array.from(new Set(agentWiseData.filter((r) => (vendorTab ? r.agent_team === vendorTab : true)).map((r) => r.agent_name).filter(Boolean)));
-  }, [agentWiseData, vendorTab]);
 
-  const supervisorList = useMemo(() => {
-    return ["All", ...new Set(mapping.map((m) => m.supervisor).filter(Boolean))];
-  }, [mapping]);
+  const agentListByVendor = useMemo(() =>
+    Array.from(new Set(agentWiseData.filter((r) => (vendorTab ? r.agent_team === vendorTab : true)).map((r) => r.agent_name ?? r.agent).filter(Boolean))),
+    [agentWiseData, vendorTab],
+  );
 
-  const waveList = useMemo(() => {
-    return ["All", ...new Set(mapping.map((m) => m.wave).filter(Boolean))];
-  }, [mapping]);
-
-  const channelList = useMemo(() => ["All", ...ahtChannels.map((c) => c.id)], []);
+  const channelList = useMemo(() => ["All", ...Array.from(new Set(agentWiseData.map((r) => (r.channel ?? r.type ?? "").toString()).filter(Boolean)))], [agentWiseData]);
 
   const agentWisePivotsByChannel = useMemo(() => {
     const weeks = overviewWeeks.length ? overviewWeeks : getLastWeeks(agentWiseData, 4);
-    const makeRows = (channelId: string) => {
-      const rows = agentWiseData.filter((r) => (
-        (r.channel?.toLowerCase() === channelId || r.type?.toLowerCase() === channelId) &&
-        (vendorTab ? r.agent_team === vendorTab : true)
-      ));
-      return pivotWeeklyRowsWithWeeks(rows, getAgentKey, (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1), weeks);
+    const makeRows = (channelId: string, valueFn: (row: DataRow) => number) => {
+      const rows = agentWiseData.filter((r) => {
+        if (vendorTab && r.agent_team !== vendorTab) return false;
+        const ch = (r.channel ?? r.type ?? "").toString().toLowerCase();
+        if (channelId && ch !== channelId) return false;
+        if (filterAgent !== "All" && getAgentKey(r) !== filterAgent) return false;
+        const agentTypeVal = r.mapping?.agent_type ?? r.agent_type ?? r.mapping?.tenure ?? "";
+        if (filterAgentType !== "All" && (agentTypeVal ?? "") !== filterAgentType) return false;
+        if (filterSupervisor !== "All" && (r.mapping?.supervisor ?? r.supervisor ?? "") !== filterSupervisor) return false;
+        if (filterWave !== "All" && (r.mapping?.wave ?? r.wave ?? "") !== filterWave) return false;
+        if (filterLanguage !== "All" && (r.mapping?.language ?? "") !== filterLanguage) return false;
+        if (filterWeek !== "All" && getRowWeek(r) !== filterWeek) return false;
+        return true;
+      });
+      return pivotWeeklyRowsWithWeeks(rows, getAgentKey, valueFn, weeks);
     };
 
-    const aht = makeRows("call");
-    const emailAht = makeRows("email");
-    const chatAht = makeRows("chat");
-
-    const csatRows = pivotWeeklyRowsWithWeeks(
-      agentWiseData.filter((r) => (r.survey_rating != null) && (vendorTab ? r.agent_team === vendorTab : true)),
-      getAgentKey,
-      (row) => toNumber(row.survey_rating ?? row.avg_csat),
+    return {
       weeks,
-    );
-
-    const qaRows = pivotWeeklyRowsWithWeeks(
-      agentWiseData.filter((r) => (r.evaluation != null || r.score != null) && (vendorTab ? r.agent_team === vendorTab : true)),
-      getAgentKey,
-      (row) => toNumber(row.evaluation ?? row.score ?? 0) * 100,
-      weeks,
-    );
-
-    return { weeks, aht: { call: aht, email: emailAht, chat: chatAht }, csat: csatRows, qa: qaRows };
-  }, [agentWiseData, vendorTab, overviewWeeks]);
+      aht: {
+        call: makeRows("call", (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1)),
+        email: makeRows("email", (row) => toNumber(row.handle_time ?? row.aht ?? row.w1)),
+        chat: makeRows("chat", (row) => toNumber(row.avg_handling_time ?? row.handle_time ?? row.aht ?? row.w1)),
+      },
+      csatByChannel: {
+        call: makeRows("call", (row) => toNumber(row.survey_rating ?? row.avg_csat)),
+        email: makeRows("email", (row) => toNumber(row.survey_rating ?? row.avg_csat)),
+        chat: makeRows("chat", (row) => toNumber(row.survey_rating ?? row.avg_csat)),
+      },
+      qaByChannel: {
+        call: makeRows("call", (row) => toNumber(row.evaluation ?? row.score ?? 0) * 100),
+        email: makeRows("email", (row) => toNumber(row.evaluation ?? row.score ?? 0) * 100),
+        chat: makeRows("chat", (row) => toNumber(row.evaluation ?? row.score ?? 0) * 100),
+      },
+    };
+  }, [agentWiseData, vendorTab, overviewWeeks, filterAgent, filterAgentType, filterSupervisor, filterWave, filterLanguage, filterWeek]);
 
   const ahtChannelFiltered = useMemo(
     () =>
@@ -1254,107 +1279,134 @@ export default function Dashboard() {
               <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-slate-500">Loading agent-level data...</div>
             ) : (
               <div className="space-y-6">
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Agent AHT by week</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent</th>
-                          {(agentWisePivotsByChannel.weeks ?? []).map((week) => (
-                                <th key={`agent-aht-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                              ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {((agentWisePivotsByChannel.aht?.call?.rows ?? []) as WeeklyPivotRow[]).length === 0 ? (
-                          <tr><td colSpan={(agentWisePivotsByChannel.weeks ?? []).length + 1} className="px-3 py-6 text-center text-slate-500">No AHT agent data available.</td></tr>
-                        ) : (
-                          (agentWisePivotsByChannel.aht?.call?.rows ?? []).map((row, index) => (
-                            <tr key={`agent-aht-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {(row.values ?? []).map((value, valueIndex) => (
-                                <td key={`${row.name}-aht-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatAhtSeconds(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Agent CSAT by week</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent</th>
-                          {(agentWisePivotsByChannel.weeks ?? []).map((week) => (
-                            <th key={`agent-csat-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {((agentWisePivotsByChannel.csat?.rows ?? []) as WeeklyPivotRow[]).length === 0 ? (
-                          <tr><td colSpan={(agentWisePivotsByChannel.weeks ?? []).length + 1} className="px-3 py-6 text-center text-slate-500">No CSAT agent data available.</td></tr>
-                        ) : (
-                          (agentWisePivotsByChannel.csat?.rows ?? []).map((row, index) => (
-                            <tr key={`agent-csat-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {(row.values ?? []).map((value, valueIndex) => (
-                                <td key={`${row.name}-agent-csat-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                  <div className="grid grid-cols-7 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Agent</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)}>
+                        <option value="All">All</option>
+                        {agentListByVendor.map((a) => <option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Agent Type</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterAgentType} onChange={(e) => setFilterAgentType(e.target.value)}>
+                        <option value="All">All</option>
+                        {uniqueAgentTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Supervisor</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterSupervisor} onChange={(e) => setFilterSupervisor(e.target.value)}>
+                        {supervisorList.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Wave</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterWave} onChange={(e) => setFilterWave(e.target.value)}>
+                        {waveList.map((w) => <option key={w} value={w}>{w}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Channel</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)}>
+                        {channelList.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Language</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
+                        {uniqueLanguages.map((l) => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500">Week</label>
+                      <select className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={filterWeek} onChange={(e) => setFilterWeek(e.target.value)}>
+                        <option value="All">All</option>
+                        {overviewWeeks.map((w) => <option key={w} value={w}>{w}</option>)}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
-                    <h2 className="text-lg font-semibold text-slate-900">Agent QA evaluation by week</h2>
-                  </div>
-                  <div className="overflow-auto px-6 py-4">
-                    <table className="min-w-full text-left text-sm text-slate-700">
-                      <thead>
-                        <tr>
-                          <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent</th>
-                          {(agentWisePivotsByChannel.weeks ?? []).map((week) => (
-                            <th key={`agent-qa-week-${week}`} className="border-b border-slate-200 px-3 py-3 font-semibold">{week}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {((agentWisePivotsByChannel.qa?.rows ?? []) as WeeklyPivotRow[]).length === 0 ? (
-                          <tr><td colSpan={(agentWisePivotsByChannel.weeks ?? []).length + 1} className="px-3 py-6 text-center text-slate-500">No QA agent data available.</td></tr>
-                        ) : (
-                          (agentWisePivotsByChannel.qa?.rows ?? []).map((row, index) => (
-                            <tr key={`agent-qa-${index}`} className={index % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                              <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{row.name}</td>
-                              {(row.values ?? []).map((value, valueIndex) => (
-                                <td key={`${row.name}-agent-qa-${valueIndex}`} className="border-b border-slate-200 px-3 py-3">
-                                  {formatNumber(value)}%
-                                </td>
+                {/* Combined per-channel tables */}
+                {(["call", "email", "chat"] as const).map((channelId) => {
+                  const weeks = agentWisePivotsByChannel.weeks ?? [];
+                  const ahtPivot = agentWisePivotsByChannel.aht?.[channelId];
+                  const csatPivot = agentWisePivotsByChannel.csatByChannel?.[channelId];
+                  const qaPivot = agentWisePivotsByChannel.qaByChannel?.[channelId];
+                  const names = Array.from(new Set([
+                    ...(ahtPivot?.rows ?? []).map((r) => r.name),
+                    ...(csatPivot?.rows ?? []).map((r) => r.name),
+                    ...(qaPivot?.rows ?? []).map((r) => r.name),
+                  ]));
+
+                  return (
+                    <div key={`channel-${channelId}`} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                      <div className="border-b border-slate-200 px-6 py-4 bg-slate-50">
+                        <h2 className="text-lg font-semibold text-slate-900">{channelId.toUpperCase()} — Agent performance</h2>
+                      </div>
+                      <div className="overflow-auto px-6 py-4">
+                        <table className="min-w-full text-left text-sm text-slate-700">
+                          <thead>
+                            <tr>
+                              <th className="border-b border-slate-200 px-3 py-3 font-semibold">Agent</th>
+                              <th className="border-b border-slate-200 px-3 py-3 font-semibold">Supervisor</th>
+                              <th className="border-b border-slate-200 px-3 py-3 font-semibold">Type</th>
+                              {weeks.map((w) => (
+                                <th key={`aht-${channelId}-${w}`} className="border-b border-slate-200 px-3 py-3 font-semibold">AHT {w}</th>
+                              ))}
+                              {weeks.map((w) => (
+                                <th key={`csat-${channelId}-${w}`} className="border-b border-slate-200 px-3 py-3 font-semibold">CSAT {w}</th>
+                              ))}
+                              {weeks.map((w) => (
+                                <th key={`qa-${channelId}-${w}`} className="border-b border-slate-200 px-3 py-3 font-semibold">QA {w}</th>
                               ))}
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                          </thead>
+                          <tbody>
+                            {names.length === 0 ? (
+                              <tr><td colSpan={3 + weeks.length * 3} className="px-3 py-6 text-center text-slate-500">No data available.</td></tr>
+                            ) : (
+                              names.map((name, idx) => {
+                                const ahtRow = ahtPivot?.rows.find((r) => r.name === name);
+                                const csatRow = csatPivot?.rows.find((r) => r.name === name);
+                                const qaRow = qaPivot?.rows.find((r) => r.name === name);
+                                const map = mappingByAgent[name] ?? {};
+                                const typeLabel = (map.agent_type ?? map.tenure ?? "").toString() || "Unknown";
+                                const isNew = /new/i.test(typeLabel);
+                                return (
+                                  <tr key={`${channelId}-agent-${name}`} className={idx % 2 === 0 ? "bg-slate-50" : "bg-white"}>
+                                    <td className="border-b border-slate-200 px-3 py-3 font-medium text-slate-800">{name}</td>
+                                    <td className="border-b border-slate-200 px-3 py-3">{map.supervisor ?? "—"}</td>
+                                    <td className="border-b border-slate-200 px-3 py-3">
+                                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${isNew ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`}>{isNew ? "Newbie" : "Tenured"}</span>
+                                    </td>
+                                    {weeks.map((w, wi) => (
+                                      <td key={`${name}-aht-${w}`} className="border-b border-slate-200 px-3 py-3">
+                                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getAgentAhtChipClass(ahtRow?.values?.[wi])}`}>{formatAhtSeconds(ahtRow?.values?.[wi])}</span>
+                                      </td>
+                                    ))}
+                                    {weeks.map((w, wi) => (
+                                      <td key={`${name}-csat-${w}`} className="border-b border-slate-200 px-3 py-3">
+                                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getCsatChipClass(csatRow?.values?.[wi])}`}>{formatNumber(csatRow?.values?.[wi])}</span>
+                                      </td>
+                                    ))}
+                                    {weeks.map((w, wi) => (
+                                      <td key={`${name}-qa-${w}`} className="border-b border-slate-200 px-3 py-3">
+                                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getPercentChipClass(qaRow?.values?.[wi])}`}>{formatNumber(qaRow?.values?.[wi])}%</span>
+                                      </td>
+                                    ))}
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
